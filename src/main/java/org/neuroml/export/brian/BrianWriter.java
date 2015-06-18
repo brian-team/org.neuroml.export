@@ -24,6 +24,7 @@ import org.lemsml.jlems.core.type.dynamics.DerivedVariable;
 import org.lemsml.jlems.core.type.dynamics.Dynamics;
 import org.lemsml.jlems.core.type.dynamics.OnCondition;
 import org.lemsml.jlems.core.type.dynamics.OnStart;
+import org.lemsml.jlems.core.type.dynamics.OnEntry;
 import org.lemsml.jlems.core.type.dynamics.StateAssignment;
 import org.lemsml.jlems.core.type.dynamics.StateVariable;
 import org.lemsml.jlems.core.type.dynamics.TimeDerivative;
@@ -355,7 +356,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 
 	}
 
-	public void getCompEqns(CompInfo compInfo, Component compOrig, String popName, ArrayList<String> stateVars, String prefix) throws ContentError, ParseError
+	public void getCompEqns(CompInfo compInfo, Component compOrig, String popName, ArrayList<String> stateVars, String prefix) throws ContentError, ParseError, GenerationException
 	{
 
 		ComponentFlattener cf = new ComponentFlattener(lems, compOrig, true, true);
@@ -414,24 +415,92 @@ public class BrianWriter extends ANeuroMLBaseWriter
 		Dynamics dyn = ctFlat.getDynamics();
 		LemsCollection<TimeDerivative> tds = dyn.getTimeDerivatives();
 		LemsCollection<Regime> rgs = dyn.getRegimes();
-		compInfo.params.append("OnCondition " + dyn.getOnConditions() + "\n OnEvent " + dyn.getOnEvents() + "\n OnStart " + dyn.getOnStarts() + "\n StateVariable " + dyn.getStateVariables() + "\n DerivedVariable " + dyn.getDerivedVariables() + "\n Regime " + dyn.regimes + "\n TimeDerivative " + dyn. getTimeDerivatives() + "\n");
 
-		for(Regime rg : rgs)
-		{
-			compInfo.params.append("Regimes : " + rg.name + "\n");
-			for(TimeDerivative rtd : rg.getTimeDerivatives())
-			{
-				String localName = prefix + rtd.getStateVariable().name;
-				stateVars.add(localName);
-				String units = " " + getBrianSIUnits(rtd.getStateVariable().getDimension());
-				if(units.contains(Unit.NO_UNIT)) units = " 1";
-				String expr = rtd.getValueExpression();
-				expr = expr.replace("^", "**");
-				compInfo.eqns.append("    d" + localName + "/dt = " + expr + " : " + units + "\n");
+		if(rgs.size() > 2) throw new GenerationException("Not implemented");
+		if(rgs.size() > 0){
+			if(rgs.get(0).b_initial==true){
+				for(TimeDerivative rtd : rgs.get(0).getTimeDerivatives())
+				{
+					String localName = prefix + rtd.getStateVariable().name;
+					stateVars.add(localName);
+					String units = " " + getBrianSIUnits(rtd.getStateVariable().getDimension());
+					if(units.contains(Unit.NO_UNIT)) units = " 1";
+					String expr = rtd.getValueExpression();
+					expr = expr.replace("^", "**");
+					compInfo.eqns.append("    d" + localName + "/dt = " + expr + " : " + units);
+				}
+				if(rgs.get(1).getTimeDerivatives().size() > 0){
+					if(rgs.get(1).getTimeDerivatives().get(0).getValueExpression()==rgs.get(0).getTimeDerivatives().get(0).getValueExpression())
+						compInfo.eqns.append(" (unless refractory)" + "\n");
+					else throw new GenerationException("Not implemented");
+				}
+				else compInfo.eqns.append(" (unless refractory)" + "\n");
+			}
+			else{
+				for(TimeDerivative rtd : rgs.get(1).getTimeDerivatives())
+				{
+					String localName = prefix + rtd.getStateVariable().name;
+					stateVars.add(localName);
+					String units = " " + getBrianSIUnits(rtd.getStateVariable().getDimension());
+					if(units.contains(Unit.NO_UNIT)) units = " 1";
+					String expr = rtd.getValueExpression();
+					expr = expr.replace("^", "**");
+					compInfo.eqns.append("    d" + localName + "/dt = " + expr + " : " + units);
+				}
+				if(rgs.get(0).getTimeDerivatives().size() > 0){
+					if(rgs.get(0).getTimeDerivatives().get(0).getValueExpression()==rgs.get(1).getTimeDerivatives().get(0).getValueExpression())
+						compInfo.eqns.append(" (unless refractory)" + "\n");
+					else throw new GenerationException("Not implemented");
+				}
+				else compInfo.eqns.append(" (unless refractory)" + "\n");
 			}
 		}
-		
 
+		for(Regime rg : rgs) {
+			for(OnCondition roc : rg.getOnConditions())
+			{
+				if(roc.test.startsWith("v .gt."))
+				{
+                	String test = roc.test.replace(".gt.", ">");
+                	test = test.replace(".lt.", "<");
+                	test = test.replace(".leq.", "<=");
+                	test = test.replace(".geq.", ">=");
+                	test = test.replace(".eq.", "==");
+                	test = test.replace(".neq.", "!=");
+                	test = test.replace(".and.", "and");
+                	test = test.replace(".or.", "or");
+                
+					compInfo.conditionInfo.append(", threshold = '" + test + "'");
+					for(StateAssignment sa : roc.stateAssignments)
+					{
+						if(sa.variable.equals("v"))
+						{
+							compInfo.conditionInfo.append(", reset = 'v = " + sa.getValueExpression() + "'");
+						}
+					}
+				}
+				if(roc.test.startsWith("t")) {
+					String test = roc.test.replace(".gt.", ">");
+                	test = test.replace(".lt.", "<");
+                	test = test.replace(".leq.", "<=");
+                	test = test.replace(".geq.", ">=");
+                	test = test.replace(".eq.", "==");
+                	test = test.replace(".neq.", "!=");
+                	test = test.replace(".and.", "and");
+                	test = test.replace(".or.", "or");
+
+                	compInfo.conditionInfo.append(", refractory = '" + test + "'");
+				}
+			}
+			for(OnEntry roe : rg.getOnEntrys()) {
+				for(StateAssignment sa : roe.stateAssignments)
+				{
+					if(sa.variable.equals("v"))
+					compInfo.conditionInfo.append(", reset = 'v = " + sa.getValueExpression() + "'");
+				}
+			}
+		}	
+		
 		for(TimeDerivative td : tds)
 		{
 			String localName = prefix + td.getStateVariable().name;
@@ -442,6 +511,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 			expr = expr.replace("^", "**");
 			compInfo.eqns.append("    d" + localName + "/dt = " + expr + " : " + units + "\n");
 		}
+		
 
 		for(StateVariable svar : dyn.getStateVariables())
 		{
@@ -588,3 +658,4 @@ public class BrianWriter extends ANeuroMLBaseWriter
 	}
 
 }
+
