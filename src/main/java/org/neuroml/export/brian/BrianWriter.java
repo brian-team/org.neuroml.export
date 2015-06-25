@@ -146,7 +146,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 
 					getCompEqns(compInfo, popComp, pop.getID(), stateVars, "");
 
-					sb.append("\n").append(compInfo.params.toString());
+					// sb.append("\n").append(compInfo.params.toString());
 
 					sb.append(prefix).append("eqs=Equations('''\n");
 					sb.append(compInfo.eqns.toString());
@@ -167,7 +167,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 						size = Integer.parseInt(pop.getStringValue("size"));
 					}
 
-					sb.append(pop.getID() + " = NeuronGroup(" + size + ", model=" + prefix + "eqs" + flags + compInfo.conditionInfo + ")\n");
+					sb.append(pop.getID() + " = NeuronGroup(" + size + ", model=" + prefix + "eqs" + flags + compInfo.conditionInfo + ", namespace={" + compInfo.params.toString() + "})\n");
 
 					sb.append(compInfo.initInfo.toString());
 				}
@@ -181,14 +181,14 @@ public class BrianWriter extends ANeuroMLBaseWriter
 
 				getCompEqns(compInfo, tgtNet, DEFAULT_POP, stateVars, "");
 
-				sb.append("\n" + compInfo.params.toString());
+				// sb.append("\n" + compInfo.params.toString());
 
 				sb.append(prefix + "eqs=Equations('''\n");
 				sb.append(compInfo.eqns.toString());
 				sb.append("''')\n\n");
 
 				String flags = "";// ,implicit=True, freeze=True
-				sb.append(DEFAULT_POP + " = NeuronGroup(" + "1" + ", model=" + prefix + "eqs" + flags + ")\n");
+				sb.append(DEFAULT_POP + " = NeuronGroup(" + "1" + ", model=" + prefix + "eqs" + flags + "namespace={" + compInfo.params.toString() + "})\n");
 
 				sb.append(compInfo.initInfo.toString());
 			}
@@ -400,104 +400,104 @@ public class BrianWriter extends ANeuroMLBaseWriter
 
 			compInfo.params.append(prefix + c.getName() + " = " + (float) c.getValue() + units + " \n");
 		}
-
+		boolean firstparam=true;
 		for(Parameter p : ps)
 		{
 			ParamValue pv = cpFlat.getParamValue(p.getName());
 			String units = " * " + getBrianSIUnits(p.getDimension());
 			if(units.contains(Unit.NO_UNIT)) units = "";
 			String val = pv == null ? "???" : (float) pv.getDoubleValue() + "";
-			compInfo.params.append(prefix + p.getName() + " = " + val + units + " \n");
+			if(!firstparam) compInfo.params.append(", ");
+			compInfo.params.append("'" + prefix + p.getName() + "' : " + val + units);
+			firstparam=false;
 		}
-
-		if(ps.size() > 0) compInfo.params.append("\n");
 
 		Dynamics dyn = ctFlat.getDynamics();
 		LemsCollection<TimeDerivative> tds = dyn.getTimeDerivatives();
 		LemsCollection<Regime> rgs = dyn.getRegimes();
-
-		if(rgs.size() > 2) throw new GenerationException("Not implemented");
+		Regime main_regime=null, refractory_regime=null;
+		if(rgs.size() > 2) throw new GenerationException("Models with more than two regimes are not yet supported");
 		if(rgs.size() > 0){
-			if(rgs.get(0).b_initial==true){
-				for(TimeDerivative rtd : rgs.get(0).getTimeDerivatives())
-				{
-					String localName = prefix + rtd.getStateVariable().name;
-					stateVars.add(localName);
-					String units = " " + getBrianSIUnits(rtd.getStateVariable().getDimension());
-					if(units.contains(Unit.NO_UNIT)) units = " 1";
-					String expr = rtd.getValueExpression();
-					expr = expr.replace("^", "**");
-					compInfo.eqns.append("    d" + localName + "/dt = " + expr + " : " + units);
+			if(rgs.size()==1)
+				main_regime = rgs.get(0);
+			else if(rgs.size()==2){
+				if(rgs.get(0).b_initial){
+					main_regime = rgs.get(0);
+					refractory_regime = rgs.get(1);
 				}
-				if(rgs.get(1).getTimeDerivatives().size() > 0){
-					if(rgs.get(1).getTimeDerivatives().get(0).getValueExpression()==rgs.get(0).getTimeDerivatives().get(0).getValueExpression())
-						compInfo.eqns.append(" (unless refractory)" + "\n");
-					else throw new GenerationException("Not implemented");
+				else if(rgs.get(1).b_initial){
+					main_regime = rgs.get(1);
+					refractory_regime = rgs.get(0);
 				}
-				else compInfo.eqns.append(" (unless refractory)" + "\n");
-			}
-			else{
-				for(TimeDerivative rtd : rgs.get(1).getTimeDerivatives())
-				{
-					String localName = prefix + rtd.getStateVariable().name;
-					stateVars.add(localName);
-					String units = " " + getBrianSIUnits(rtd.getStateVariable().getDimension());
-					if(units.contains(Unit.NO_UNIT)) units = " 1";
-					String expr = rtd.getValueExpression();
-					expr = expr.replace("^", "**");
-					compInfo.eqns.append("    d" + localName + "/dt = " + expr + " : " + units);
-				}
-				if(rgs.get(0).getTimeDerivatives().size() > 0){
-					if(rgs.get(0).getTimeDerivatives().get(0).getValueExpression()==rgs.get(1).getTimeDerivatives().get(0).getValueExpression())
-						compInfo.eqns.append(" (unless refractory)" + "\n");
-					else throw new GenerationException("Not implemented");
-				}
-				else compInfo.eqns.append(" (unless refractory)" + "\n");
 			}
 		}
 
-		for(Regime rg : rgs) {
-			for(OnCondition roc : rg.getOnConditions())
+		if(main_regime!=null){
+
+			for(TimeDerivative rtd : main_regime.getTimeDerivatives())
 			{
-				if(roc.test.startsWith("v .gt."))
-				{
-                	String test = roc.test.replace(".gt.", ">");
-                	test = test.replace(".lt.", "<");
-                	test = test.replace(".leq.", "<=");
-                	test = test.replace(".geq.", ">=");
-                	test = test.replace(".eq.", "==");
-                	test = test.replace(".neq.", "!=");
-                	test = test.replace(".and.", "and");
-                	test = test.replace(".or.", "or");
-                
-					compInfo.conditionInfo.append(", threshold = '" + test + "'");
-					for(StateAssignment sa : roc.stateAssignments)
-					{
-						if(sa.variable.equals("v"))
-						{
-							compInfo.conditionInfo.append(", reset = 'v = " + sa.getValueExpression() + "'");
-						}
+				String localName = prefix + rtd.getStateVariable().name;
+				stateVars.add(localName);
+				String units = " " + getBrianSIUnits(rtd.getStateVariable().getDimension());
+				if(units.contains(Unit.NO_UNIT)) units = " 1";
+				String expr = rtd.getValueExpression();
+				expr = expr.replace("^", "**");
+				compInfo.eqns.append("    d" + localName + "/dt = " + expr + " : " + units);
+			}
+			if(refractory_regime!=null){
+				if(refractory_regime.getTimeDerivatives().size()!=0){
+					for(TimeDerivative t : refractory_regime.getTimeDerivatives()){
+						if (t.getStateVariable().name!=main_regime.getTimeDerivatives().get(0).getStateVariable().name)
+							throw new GenerationException("Models with refractory regime timederivative entries different from other regimes are not supported");
+						else compInfo.eqns.append("\n");
 					}
 				}
-				if(roc.test.startsWith("t")) {
-					String test = roc.test.replace(".gt.", ">");
-                	test = test.replace(".lt.", "<");
-                	test = test.replace(".leq.", "<=");
-                	test = test.replace(".geq.", ">=");
-                	test = test.replace(".eq.", "==");
-                	test = test.replace(".neq.", "!=");
-                	test = test.replace(".and.", "and");
-                	test = test.replace(".or.", "or");
+				else 
+					compInfo.eqns.append(" (unless refractory)" + "\n");
+			}
 
-                	compInfo.conditionInfo.append(", refractory = '" + test + "'");
+			for(OnCondition roc : main_regime.getOnConditions())
+			{
+				String test = roc.test.replace(".gt.", ">");
+                test = test.replace(".lt.", "<");
+                test = test.replace(".leq.", "<=");
+                test = test.replace(".geq.", ">=");
+                test = test.replace(".eq.", "==");
+                test = test.replace(".neq.", "!=");
+                test = test.replace(".and.", "and");
+                test = test.replace(".or.", "or");
+                
+				compInfo.conditionInfo.append(", threshold = '" + test + "'");
+				for(StateAssignment sa : roc.stateAssignments)
+				{
+					compInfo.conditionInfo.append(", reset = '" + sa.variable + " = " + sa.getValueExpression() + "'");
 				}
 			}
-			for(OnEntry roe : rg.getOnEntrys()) {
-				for(StateAssignment sa : roe.stateAssignments)
-				{
-					if(sa.variable.equals("v"))
-					compInfo.conditionInfo.append(", reset = 'v = " + sa.getValueExpression() + "'");
+		}
+
+		if(refractory_regime!=null){
+
+			for(OnEntry roe : refractory_regime.getOnEntrys()){
+				if(roe.stateAssignments!=null){
+					compInfo.conditionInfo.append(", reset = '''" + "\n");
+					for(StateAssignment sa : roe.stateAssignments){
+						compInfo.conditionInfo.append(sa.variable + " = " + sa.getValueExpression() + "\n");
+					}
+					compInfo.conditionInfo.append("'''");
 				}
+			}
+
+			for(OnCondition roc : refractory_regime.getOnConditions()){
+				String test = roc.test.replace(".gt.", ">");
+                test = test.replace(".lt.", "<");
+                test = test.replace(".leq.", "<=");
+                test = test.replace(".geq.", ">=");
+                test = test.replace(".eq.", "==");
+                test = test.replace(".neq.", "!=");
+                test = test.replace(".and.", "and");
+                test = test.replace(".or.", "or");
+
+                compInfo.conditionInfo.append(", refractory = 'not(" + test + ")'");
 			}
 		}	
 		
@@ -658,4 +658,3 @@ public class BrianWriter extends ANeuroMLBaseWriter
 	}
 
 }
-
