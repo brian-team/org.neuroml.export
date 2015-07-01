@@ -144,15 +144,22 @@ public class BrianWriter extends ANeuroMLBaseWriter
 					CompInfo compInfo = new CompInfo();
 					ArrayList<String> stateVars = new ArrayList<String>();
 
-					getCompEqns(compInfo, popComp, pop.getID(), stateVars, "");
+					getCompEqns(compInfo, popComp, pop.getID(), stateVars, prefix);
 
-					// sb.append("\n").append(compInfo.params.toString());
+					sb.append("\n" + prefix).append("namespace = {" + compInfo.params.toString() + "}\n\n");
 
 					sb.append(prefix).append("eqs=Equations('''\n");
 					sb.append(compInfo.eqns.toString());
 					sb.append("''')\n\n");
-
+					sb.append(compInfo.conditionInfo.toString());
+					
 					String flags = "";// ,implicit=True, freeze=True
+					if(compInfo.conditions[0]==true)
+						flags = ", threshold = " + prefix + "threshold";
+					if(compInfo.conditions[1]==true)
+						flags = flags + ", reset = " + prefix + "reset";
+					if(compInfo.conditions[2]==true)
+						flags = flags + ", refractory = " + prefix + "refractory";
 					int size = -1;
 					if(pop.getComponentType().isOrExtends(NeuroMLElements.POPULATION_LIST))
 					{
@@ -167,7 +174,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 						size = Integer.parseInt(pop.getStringValue("size"));
 					}
 
-					sb.append(pop.getID() + " = NeuronGroup(" + size + ", model=" + prefix + "eqs" + flags + compInfo.conditionInfo + ", namespace={" + compInfo.params.toString() + "})\n");
+					sb.append(pop.getID() + " = NeuronGroup(" + size + ", model=" + prefix + "eqs" + flags + ", namespace=" + prefix + "namespace )\n");
 
 					sb.append(compInfo.initInfo.toString());
 				}
@@ -188,7 +195,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 				sb.append("''')\n\n");
 
 				String flags = "";// ,implicit=True, freeze=True
-				sb.append(DEFAULT_POP + " = NeuronGroup(" + "1" + ", model=" + prefix + "eqs" + flags + "namespace={" + compInfo.params.toString() + "})\n");
+				sb.append(DEFAULT_POP + " = NeuronGroup(" + "1" + ", model=" + prefix + "eqs" + flags + ", namespace=" + prefix + "namespace )\n");
 
 				sb.append(compInfo.initInfo.toString());
 			}
@@ -363,6 +370,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 
 		ComponentType ctFlat;
 		Component cpFlat;
+		// compInfo.conditions=[false,false,false];
 		try
 		{
 			ctFlat = cf.getFlatType();
@@ -407,8 +415,8 @@ public class BrianWriter extends ANeuroMLBaseWriter
 			String units = " * " + getBrianSIUnits(p.getDimension());
 			if(units.contains(Unit.NO_UNIT)) units = "";
 			String val = pv == null ? "???" : (float) pv.getDoubleValue() + "";
-			if(!firstparam) compInfo.params.append(", ");
-			compInfo.params.append("'" + prefix + p.getName() + "' : " + val + units);
+			if(!firstparam) compInfo.params.append(",\n");
+			compInfo.params.append("'" + p.getName() + "' : " + val + units);
 			firstparam=false;
 		}
 
@@ -467,10 +475,12 @@ public class BrianWriter extends ANeuroMLBaseWriter
                 test = test.replace(".and.", "and");
                 test = test.replace(".or.", "or");
                 
-				compInfo.conditionInfo.append(", threshold = '" + test + "'");
+				compInfo.conditionInfo.append(prefix + "threshold = '" + test + "'" + "\n\n");
+				compInfo.conditions[0]=true;
 				for(StateAssignment sa : roc.stateAssignments)
 				{
-					compInfo.conditionInfo.append(", reset = '" + sa.variable + " = " + sa.getValueExpression() + "'");
+					compInfo.conditionInfo.append(prefix + "reset = '" + sa.variable + " = " + sa.getValueExpression() + "'" + "\n\n");
+					compInfo.conditions[1]=true;
 				}
 			}
 		}
@@ -479,11 +489,12 @@ public class BrianWriter extends ANeuroMLBaseWriter
 
 			for(OnEntry roe : refractory_regime.getOnEntrys()){
 				if(roe.stateAssignments!=null){
-					compInfo.conditionInfo.append(", reset = '''" + "\n");
+					compInfo.conditionInfo.append(prefix + "reset = '''" + "\n");
 					for(StateAssignment sa : roe.stateAssignments){
-						compInfo.conditionInfo.append(sa.variable + " = " + sa.getValueExpression() + "\n");
+						compInfo.conditionInfo.append("      " + sa.variable + " = " + sa.getValueExpression() + "\n");
 					}
-					compInfo.conditionInfo.append("'''");
+					compInfo.conditionInfo.append("'''\n\n");
+					compInfo.conditions[1]=true;
 				}
 			}
 
@@ -497,7 +508,8 @@ public class BrianWriter extends ANeuroMLBaseWriter
                 test = test.replace(".and.", "and");
                 test = test.replace(".or.", "or");
 
-                compInfo.conditionInfo.append(", refractory = 'not(" + test + ")'");
+                compInfo.conditionInfo.append(prefix + "refractory = 'not(" + test + ")'\n\n");
+                compInfo.conditions[2]=true;
 			}
 		}	
 		
@@ -571,7 +583,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 				{
 					initVal = Utils.replaceInExpression(initVal, edv.getName(), popName + "." + prefix + edv.getName());
 				}
-				compInfo.initInfo.append(popName + "." + prefix + va.getStateVariable().getName() + " = " + initVal + "\n");
+				compInfo.initInfo.append(popName + "." + va.getStateVariable().getName() + " = '" + initVal + "'\n\n");
 			}
 
 		}
@@ -589,12 +601,14 @@ public class BrianWriter extends ANeuroMLBaseWriter
                 test = test.replace(".and.", "and");
                 test = test.replace(".or.", "or");
                 
-				compInfo.conditionInfo.append(", threshold = '" + test + "'");
+				compInfo.conditionInfo.append(prefix + "threshold = '" + test + "'\n\n");
+				compInfo.conditions[0]=true;
 				for(StateAssignment sa : oc.stateAssignments)
 				{
 					if(sa.variable.equals("v"))
 					{
-						compInfo.conditionInfo.append(", reset = 'v = " + sa.getValueExpression() + "'");
+						compInfo.conditionInfo.append(prefix + "reset = 'v = " + sa.getValueExpression() + "'\n\n");
+						compInfo.conditions[1]=true;
 					}
 				}
 			}
