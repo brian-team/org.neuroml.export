@@ -444,7 +444,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 
 			for(TimeDerivative rtd : main_regime.getTimeDerivatives())
 			{
-				String localName = prefix + rtd.getStateVariable().name;
+				String localName = rtd.getStateVariable().name;
 				stateVars.add(localName);
 				String units = " " + getBrianSIUnits(rtd.getStateVariable().getDimension());
 				if(units.contains(Unit.NO_UNIT)) units = " 1";
@@ -515,7 +515,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 		
 		for(TimeDerivative td : tds)
 		{
-			String localName = prefix + td.getStateVariable().name;
+			String localName = td.getStateVariable().name;
 			stateVars.add(localName);
 			String units = " " + getBrianSIUnits(td.getStateVariable().getDimension());
 			if(units.contains(Unit.NO_UNIT)) units = " 1";
@@ -550,7 +550,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 			if(expr.startsWith("0 ")) expr = "(0 *" + units + ") " + expr.substring(2);
 			if(expr.equals("0")) expr = expr + " * " + units;
 			expr = expr.replace("^", "**");
-			compInfo.eqns.append("    " + prefix + edv.getName() + " = " + expr + " : " + units + "\n");
+			compInfo.eqns.append("    " + edv.getName() + " = " + expr + " : " + units + "\n");
 		}
 
 		LemsCollection<OnStart> initBlocks = dyn.getOnStarts();
