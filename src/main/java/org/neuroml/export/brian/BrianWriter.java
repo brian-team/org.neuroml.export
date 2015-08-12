@@ -24,11 +24,9 @@ import org.lemsml.jlems.core.type.dynamics.DerivedVariable;
 import org.lemsml.jlems.core.type.dynamics.Dynamics;
 import org.lemsml.jlems.core.type.dynamics.OnCondition;
 import org.lemsml.jlems.core.type.dynamics.OnStart;
-import org.lemsml.jlems.core.type.dynamics.OnEntry;
 import org.lemsml.jlems.core.type.dynamics.StateAssignment;
 import org.lemsml.jlems.core.type.dynamics.StateVariable;
 import org.lemsml.jlems.core.type.dynamics.TimeDerivative;
-import org.lemsml.jlems.core.type.dynamics.Regime;
 import org.lemsml.jlems.io.util.FileUtil;
 import org.lemsml.jlems.io.xmlio.XMLSerializer;
 import org.neuroml.export.base.ANeuroMLBaseWriter;
@@ -47,8 +45,6 @@ public class BrianWriter extends ANeuroMLBaseWriter
 {
 
 	static String DEFAULT_POP = "OneComponentPop";
-
-	boolean brian2 = false;
 
 	public BrianWriter(Lems lems) throws ModelFeatureSupportException, LEMSException, NeuroMLException
 	{
@@ -73,12 +69,6 @@ public class BrianWriter extends ANeuroMLBaseWriter
 		sli.addSupportInfo(format, ModelFeature.MULTICOMPARTMENTAL_CELL_MODEL, SupportLevelInfo.Level.NONE);
 		sli.addSupportInfo(format, ModelFeature.HH_CHANNEL_MODEL, SupportLevelInfo.Level.LOW);
 		sli.addSupportInfo(format, ModelFeature.KS_CHANNEL_MODEL, SupportLevelInfo.Level.NONE);
-		sli.addSupportInfo(format, ModelFeature.MULTI_CELL_MODEL, SupportLevelInfo.Level.LOW);
-	}
-
-	public void setBrian2(boolean brian2)
-	{
-		this.brian2 = brian2;
 	}
 
 	@Override
@@ -102,15 +92,8 @@ public class BrianWriter extends ANeuroMLBaseWriter
 			addComment(sb, Utils.getHeaderComment(format));
 
 			String times = "times";
-			if(!brian2)
-			{
-				sb.append("from brian import *\n\n");
-			}
-			else
-			{
-				sb.append("from brian2 import *\n\n");
-				times = "t";
-			}
+			
+			sb.append("from brian import *\n\n");
 
 			sb.append("from math import *\n");
 			sb.append("import sys\n\n");
@@ -144,22 +127,15 @@ public class BrianWriter extends ANeuroMLBaseWriter
 					CompInfo compInfo = new CompInfo();
 					ArrayList<String> stateVars = new ArrayList<String>();
 
-					getCompEqns(compInfo, popComp, pop.getID(), stateVars, prefix);
+					getCompEqns(compInfo, popComp, pop.getID(), stateVars, "");
 
-					sb.append("\n" + prefix).append("namespace = {" + compInfo.params.toString() + "}\n\n");
+					sb.append("\n").append(compInfo.params.toString());
 
 					sb.append(prefix).append("eqs=Equations('''\n");
 					sb.append(compInfo.eqns.toString());
 					sb.append("''')\n\n");
-					sb.append(compInfo.conditionInfo.toString());
-					
+
 					String flags = "";// ,implicit=True, freeze=True
-					if(compInfo.conditions[0]==true)
-						flags = ", threshold = " + prefix + "threshold";
-					if(compInfo.conditions[1]==true)
-						flags = flags + ", reset = " + prefix + "reset";
-					if(compInfo.conditions[2]==true)
-						flags = flags + ", refractory = " + prefix + "refractory";
 					int size = -1;
 					if(pop.getComponentType().isOrExtends(NeuroMLElements.POPULATION_LIST))
 					{
@@ -174,7 +150,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 						size = Integer.parseInt(pop.getStringValue("size"));
 					}
 
-					sb.append(pop.getID() + " = NeuronGroup(" + size + ", model=" + prefix + "eqs" + flags + ", namespace=" + prefix + "namespace )\n");
+					sb.append(pop.getID() + " = NeuronGroup(" + size + ", model=" + prefix + "eqs" + flags + compInfo.conditionInfo + ")\n");
 
 					sb.append(compInfo.initInfo.toString());
 				}
@@ -188,14 +164,14 @@ public class BrianWriter extends ANeuroMLBaseWriter
 
 				getCompEqns(compInfo, tgtNet, DEFAULT_POP, stateVars, "");
 
-				// sb.append("\n" + compInfo.params.toString());
+				sb.append("\n" + compInfo.params.toString());
 
 				sb.append(prefix + "eqs=Equations('''\n");
 				sb.append(compInfo.eqns.toString());
 				sb.append("''')\n\n");
 
 				String flags = "";// ,implicit=True, freeze=True
-				sb.append(DEFAULT_POP + " = NeuronGroup(" + "1" + ", model=" + prefix + "eqs" + flags + ", namespace=" + prefix + "namespace )\n");
+				sb.append(DEFAULT_POP + " = NeuronGroup(" + "1" + ", model=" + prefix + "eqs" + flags + ")\n");
 
 				sb.append(compInfo.initInfo.toString());
 			}
@@ -236,7 +212,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 							}
 
 							if(postRunSave.indexOf("[0]") > 0) postRunSave.append(", ");
-							postRunSave.append(monitor + (brian2 ? "." + l1.getVariable() : "") + "[0] ");
+							postRunSave.append(monitor + "[0] ");
 
 						}
 					}
@@ -277,7 +253,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 							String plotId = "plot_" + lineComp.getID();
 
 							postRunPlot.append("    " + plotId + " = " + dispId + ".add_subplot(111, autoscale_on=True)\n");
-							postRunPlot.append("    " + plotId + ".plot(" + trace + "." + times + "/second," + trace + (brian2 ? "." + l1.getVariable() : "") + "[" + l1.getPopulationIndex()
+							postRunPlot.append("    " + plotId + ".plot(" + trace + "." + times + "/second," + trace +  "[" + l1.getPopulationIndex()
 									+ "], color=\"" + lineComp.getStringValue("color") + "\", label=\"" + lineComp.getID() + "\")\n");
 							postRunPlot.append("    " + plotId + ".legend()\n");
 						}
@@ -363,14 +339,13 @@ public class BrianWriter extends ANeuroMLBaseWriter
 
 	}
 
-	public void getCompEqns(CompInfo compInfo, Component compOrig, String popName, ArrayList<String> stateVars, String prefix) throws ContentError, ParseError, GenerationException
+	public void getCompEqns(CompInfo compInfo, Component compOrig, String popName, ArrayList<String> stateVars, String prefix) throws ContentError, ParseError
 	{
 
 		ComponentFlattener cf = new ComponentFlattener(lems, compOrig, true, true);
 
 		ComponentType ctFlat;
 		Component cpFlat;
-		// compInfo.conditions=[false,false,false];
 		try
 		{
 			ctFlat = cf.getFlatType();
@@ -408,114 +383,24 @@ public class BrianWriter extends ANeuroMLBaseWriter
 
 			compInfo.params.append(prefix + c.getName() + " = " + (float) c.getValue() + units + " \n");
 		}
-		boolean firstparam=true;
+
 		for(Parameter p : ps)
 		{
 			ParamValue pv = cpFlat.getParamValue(p.getName());
 			String units = " * " + getBrianSIUnits(p.getDimension());
 			if(units.contains(Unit.NO_UNIT)) units = "";
 			String val = pv == null ? "???" : (float) pv.getDoubleValue() + "";
-			if(!firstparam) compInfo.params.append(",\n");
-			compInfo.params.append("'" + p.getName() + "' : " + val + units);
-			firstparam=false;
+			compInfo.params.append(prefix + p.getName() + " = " + val + units + " \n");
 		}
+
+		if(ps.size() > 0) compInfo.params.append("\n");
 
 		Dynamics dyn = ctFlat.getDynamics();
 		LemsCollection<TimeDerivative> tds = dyn.getTimeDerivatives();
-		LemsCollection<Regime> rgs = dyn.getRegimes();
-		Regime main_regime=null, refractory_regime=null;
-		if(rgs.size() > 2) throw new GenerationException("Models with more than two regimes are not yet supported");
-		if(rgs.size() > 0){
-			if(rgs.size()==1)
-				main_regime = rgs.get(0);
-			else if(rgs.size()==2){
-				if(rgs.get(0).b_initial){
-					main_regime = rgs.get(0);
-					refractory_regime = rgs.get(1);
-				}
-				else if(rgs.get(1).b_initial){
-					main_regime = rgs.get(1);
-					refractory_regime = rgs.get(0);
-				}
-			}
-		}
 
-		if(main_regime!=null){
-
-			for(TimeDerivative rtd : main_regime.getTimeDerivatives())
-			{
-				String localName = rtd.getStateVariable().name;
-				stateVars.add(localName);
-				String units = " " + getBrianSIUnits(rtd.getStateVariable().getDimension());
-				if(units.contains(Unit.NO_UNIT)) units = " 1";
-				String expr = rtd.getValueExpression();
-				expr = expr.replace("^", "**");
-				compInfo.eqns.append("    d" + localName + "/dt = " + expr + " : " + units);
-			}
-			if(refractory_regime!=null){
-				if(refractory_regime.getTimeDerivatives().size()!=0){
-					for(TimeDerivative t : refractory_regime.getTimeDerivatives()){
-						if (t.getStateVariable().name!=main_regime.getTimeDerivatives().get(0).getStateVariable().name)
-							throw new GenerationException("Models with refractory regime timederivative entries different from other regimes are not supported");
-						else compInfo.eqns.append("\n");
-					}
-				}
-				else 
-					compInfo.eqns.append(" (unless refractory)" + "\n");
-			}
-
-			for(OnCondition roc : main_regime.getOnConditions())
-			{
-				String test = roc.test.replace(".gt.", ">");
-                test = test.replace(".lt.", "<");
-                test = test.replace(".leq.", "<=");
-                test = test.replace(".geq.", ">=");
-                test = test.replace(".eq.", "==");
-                test = test.replace(".neq.", "!=");
-                test = test.replace(".and.", "and");
-                test = test.replace(".or.", "or");
-                
-				compInfo.conditionInfo.append(prefix + "threshold = '" + test + "'" + "\n\n");
-				compInfo.conditions[0]=true;
-				for(StateAssignment sa : roc.stateAssignments)
-				{
-					compInfo.conditionInfo.append(prefix + "reset = '" + sa.variable + " = " + sa.getValueExpression() + "'" + "\n\n");
-					compInfo.conditions[1]=true;
-				}
-			}
-		}
-
-		if(refractory_regime!=null){
-
-			for(OnEntry roe : refractory_regime.getOnEntrys()){
-				if(roe.stateAssignments!=null){
-					compInfo.conditionInfo.append(prefix + "reset = '''" + "\n");
-					for(StateAssignment sa : roe.stateAssignments){
-						compInfo.conditionInfo.append("      " + sa.variable + " = " + sa.getValueExpression() + "\n");
-					}
-					compInfo.conditionInfo.append("'''\n\n");
-					compInfo.conditions[1]=true;
-				}
-			}
-
-			for(OnCondition roc : refractory_regime.getOnConditions()){
-				String test = roc.test.replace(".gt.", ">");
-                test = test.replace(".lt.", "<");
-                test = test.replace(".leq.", "<=");
-                test = test.replace(".geq.", ">=");
-                test = test.replace(".eq.", "==");
-                test = test.replace(".neq.", "!=");
-                test = test.replace(".and.", "and");
-                test = test.replace(".or.", "or");
-
-                compInfo.conditionInfo.append(prefix + "refractory = 'not(" + test + ")'\n\n");
-                compInfo.conditions[2]=true;
-			}
-		}	
-		
 		for(TimeDerivative td : tds)
 		{
-			String localName = td.getStateVariable().name;
+			String localName = prefix + td.getStateVariable().name;
 			stateVars.add(localName);
 			String units = " " + getBrianSIUnits(td.getStateVariable().getDimension());
 			if(units.contains(Unit.NO_UNIT)) units = " 1";
@@ -523,19 +408,18 @@ public class BrianWriter extends ANeuroMLBaseWriter
 			expr = expr.replace("^", "**");
 			compInfo.eqns.append("    d" + localName + "/dt = " + expr + " : " + units + "\n");
 		}
-		
 
 		for(StateVariable svar : dyn.getStateVariables())
 		{
 			String localName = prefix + svar.getName();
 			String units = " " + getBrianSIUnits(svar.getDimension());
-			// if(units.contains(Unit.NO_UNIT)) units = " 1";
-			// if(!stateVars.contains(localName)) // i.e. no TimeDerivative of
-			// 									// StateVariable
-			// {
-			// 	stateVars.add(localName);
-			// 	compInfo.eqns.append("    d" + localName + "/dt = 0 * 1/second : " + units + "\n");
-			// }
+			if(units.contains(Unit.NO_UNIT)) units = " 1";
+			if(!stateVars.contains(localName)) // i.e. no TimeDerivative of
+												// StateVariable
+			{
+				stateVars.add(localName);
+				compInfo.eqns.append("    d" + localName + "/dt = 0 * 1/second : " + units + "\n");
+			}
 		}
 
 		LemsCollection<DerivedVariable> expDevVar = dyn.getDerivedVariables();
@@ -550,7 +434,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 			if(expr.startsWith("0 ")) expr = "(0 *" + units + ") " + expr.substring(2);
 			if(expr.equals("0")) expr = expr + " * " + units;
 			expr = expr.replace("^", "**");
-			compInfo.eqns.append("    " + edv.getName() + " = " + expr + " : " + units + "\n");
+			compInfo.eqns.append("    " + prefix + edv.getName() + " = " + expr + " : " + units + "\n");
 		}
 
 		LemsCollection<OnStart> initBlocks = dyn.getOnStarts();
@@ -583,7 +467,7 @@ public class BrianWriter extends ANeuroMLBaseWriter
 				{
 					initVal = Utils.replaceInExpression(initVal, edv.getName(), popName + "." + prefix + edv.getName());
 				}
-				compInfo.initInfo.append(popName + "." + va.getStateVariable().getName() + " = '" + initVal + "'\n\n");
+				compInfo.initInfo.append(popName + "." + prefix + va.getStateVariable().getName() + " = " + initVal + "\n");
 			}
 
 		}
@@ -601,14 +485,12 @@ public class BrianWriter extends ANeuroMLBaseWriter
                 test = test.replace(".and.", "and");
                 test = test.replace(".or.", "or");
                 
-				compInfo.conditionInfo.append(prefix + "threshold = '" + test + "'\n\n");
-				compInfo.conditions[0]=true;
+				compInfo.conditionInfo.append(", threshold = '" + test + "'");
 				for(StateAssignment sa : oc.stateAssignments)
 				{
 					if(sa.variable.equals("v"))
 					{
-						compInfo.conditionInfo.append(prefix + "reset = 'v = " + sa.getValueExpression() + "'\n\n");
-						compInfo.conditions[1]=true;
+						compInfo.conditionInfo.append(", reset = 'v = " + sa.getValueExpression() + "'");
 					}
 				}
 			}
@@ -632,11 +514,9 @@ public class BrianWriter extends ANeuroMLBaseWriter
 
             BrianWriter bw = new BrianWriter(lems);
 
-            bw.setBrian2(true);
-
             String br = bw.getMainScript();
 
-            File brFile = new File(lemsFile.getAbsolutePath().replaceAll(".xml", "_brian" + (bw.brian2 ? "2" : "") + ".py"));
+            File brFile = new File(lemsFile.getAbsolutePath().replaceAll(".xml", "_brian" + ".py"));
             System.out.println("Writing to: " + brFile.getAbsolutePath());
 
             FileUtil.writeStringToFile(br, brFile);
@@ -644,11 +524,10 @@ public class BrianWriter extends ANeuroMLBaseWriter
             lems = Utils.readLemsNeuroMLFile(lemsFile).getLems();
             bw = new BrianWriter(lems);
             
-            bw.setBrian2(false);
 
             br = bw.getMainScript();
 
-            brFile = new File(lemsFile.getAbsolutePath().replaceAll(".xml", "_brian" + (bw.brian2 ? "2" : "") + ".py"));
+            brFile = new File(lemsFile.getAbsolutePath().replaceAll(".xml", "_brian" +  ".py"));
             System.out.println("Writing to: " + brFile.getAbsolutePath());
 
             FileUtil.writeStringToFile(br, brFile);
